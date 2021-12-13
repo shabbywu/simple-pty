@@ -13,10 +13,8 @@ on:
     types: [published]
 
 jobs:
-  deploy:
-
+  build-and-publish:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python
@@ -28,9 +26,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install poetry
     - name: Build package
-      run: poetry build
+      run: |
+        poetry build
+        echo ${{ github.sha }} > Release.txt
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1.4
       with:
         user: __token__
         password: ${{ secrets.PYPI_API_TOKEN }}
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          Release.txt
+          dist/*
