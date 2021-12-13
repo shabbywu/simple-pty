@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "simple-pty"
+version = "1.0.0"
+description = "A utils for easily spawning interactive pty, which listening some signal like `signal.SIGWINCH`"
+authors = ["shabbywu <shabbywu@qq.com>"]
+license = "Apache-2.0"
+
+readme = "README.md"
+repository = "https://github.com/shabbywu/simple-pty"
+homepage = "https://github.com/shabbywu/simple-pty"
+
+packages = [
+    {include = "spty.py"}
+]
+
+[tool.poetry.dependencies]
+python = ">=3.6"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
