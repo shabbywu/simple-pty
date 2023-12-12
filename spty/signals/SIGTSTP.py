@@ -21,7 +21,7 @@ def build_tstp_handler(
         atexit.register(killall_suspended_when_exited)
         if child_pid in global_jobs:
             raise ValueError("child have been suspended.")
-        # hangup the process by sending SIGSTOP
+        # hang up the process by sending SIGSTOP
         os.kill(child_pid, signal.SIGSTOP)
         # store the context for resuming
         global_jobs[child_pid] = (child_pid, master_fd, signal_fd)
