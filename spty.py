@@ -1,105 +1,48 @@
 """An utils for easily spawning interactive pty, which listening some signal like `signal.SIGWINCH`"""
-import fcntl
 import os
 import signal
-import struct
-import termios
-import tty
+from typing import Tuple, Callable, Optional
 
-from os import close, waitpid
+from os import close, waitpid, WIFEXITED, WEXITSTATUS, WIFSIGNALED, WTERMSIG
 from pty import fork
-from select import select
-from tty import setraw, tcgetattr, tcsetattr
-
-
-__all__ = ["spawn"]
-
-
-STDIN_FILENO = 0
-STDOUT_FILENO = 1
-STDERR_FILENO = 2
+from signals import initial_signals
+from signals.SIGWINCH import set_winsize, get_size
+from signals.SIGTSTP import resume_by_pid
+from streaming import STDIN_FILENO, _read, redirect_stdin_to_fd
+from exceptions import SignalToStopTerminal
 
 CHILD = 0
+__ALL__ = ["spawn"]
 
 
-def get_size(fd):
+def waitstatus_to_exitcode(status):
+    """Convert a wait status to an exit code.
+
+    backport from python3.9
     """
-    Return a tuple (rows, cols, xpix, ypix) representing the size of the TTY `fd`.
-    The provided file descriptor should be the stdout stream of the TTY.
-    If the TTY size cannot be determined, returns None.
-    """
-    if not os.isatty(fd):
-        return None
+    if WIFEXITED(status):
+        return WEXITSTATUS(status)
+    elif WIFSIGNALED(status):
+        return WTERMSIG(status)
+    raise ValueError("unknown waitstatus")
+
+
+def get_tty_name(pid, fd):
     try:
-        dims = struct.unpack("hhhh", fcntl.ioctl(fd, termios.TIOCGWINSZ, "hhhhhhhh"))
-    except:
-        try:
-            dims = (os.environ["LINES"], os.environ["COLUMNS"], 0, 0)
-        except:
-            return None
-    return dims
+        link_path = f"/proc/{pid}/fd/{fd}"
+        tty_path = os.readlink(link_path)
+        return tty_path.split("/dev/")[1]
+    except FileNotFoundError:
+        return None
 
 
-def set_winsize(fd, rows, cols, xpix=0, ypix=0):
-    """set the termios.TIOCSWINSZ to the fd."""
-    winsize = struct.pack("HHHH", rows, cols, xpix, ypix)
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+def spawn(
+    argv, master_read=_read, stdin_read=_read
+) -> Tuple[int, int, Optional[Callable]]:
+    """Create a spawned interactive process.
 
-
-def _writen(fd, data):
-    """Write all the data to a descriptor.
-
-    reference: https://github.com/python/cpython/blob/main/Lib/pty.py#L124
-    """
-    while data:
-        n = os.write(fd, data)
-        data = data[n:]
-
-
-def _read(fd):
-    """Default read function.
-
-    reference: https://github.com/python/cpython/blob/main/Lib/pty.py#L130
-    """
-    return os.read(fd, 1024)
-
-
-def _copy(master_fd, master_read=_read, stdin_read=_read):
-    """Parent copy loop.
-    Copies
-            pty master -> standard output   (master_read)
-            standard input -> pty master    (stdin_read)
-
-    reference: https://github.com/python/cpython/blob/main/Lib/pty.py#L134
-    """
-    fds = [master_fd, STDIN_FILENO]
-    while fds:
-        rfds, _wfds, _xfds = select(fds, [], [])
-
-        if master_fd in rfds:
-            # Some OSes signal EOF by returning an empty byte string,
-            # some throw OSErrors.
-            try:
-                data = master_read(master_fd)
-            except OSError:
-                data = b""
-            if not data:  # Reached EOF.
-                return  # Assume the child process has exited and is
-                # unreachable, so we clean up.
-            else:
-                os.write(STDOUT_FILENO, data)
-
-        if STDIN_FILENO in rfds:
-            data = stdin_read(STDIN_FILENO)
-            if not data:
-                fds.remove(STDIN_FILENO)
-            else:
-                _writen(master_fd, data)
-
-
-def spawn(argv, master_read=_read, stdin_read=_read):
-    """Create a spawned process.
-
+    :return: Tuple[child_pid, child_exit_code, optional callable to resume the child process]
+        - only when child_exit_code is signal.SIGTSTP, the resume will be not None
     reference: https://github.com/python/cpython/blob/main/Lib/pty.py#L163
     """
     if type(argv) == type(""):
@@ -109,26 +52,52 @@ def spawn(argv, master_read=_read, stdin_read=_read):
     if pid == CHILD:
         os.execlp(argv[0], *argv)
 
-    try:
-        mode = tcgetattr(STDIN_FILENO)
-        setraw(STDIN_FILENO)
-        restore = True
-    except tty.error:  # This is the same as termios.error
-        restore = False
+    # here will only run by master
+    # 1. install signal
+    signal_fd, signal_slave_fd = os.openpty()
+    initial_signals(
+        {
+            signal.SIGWINCH: {"master_fd": master_fd},
+            signal.SIGTSTP: {
+                "child_pid": pid,
+                "master_fd": master_fd,
+                "signal_fd": signal_fd,
+            },
+            signal.SIGINT: {"child_pid": pid},
+        }
+    )
 
-    def handle_winsize(signum, frame):
-        if signum != signal.SIGWINCH:
-            return
-        set_winsize(master_fd, *get_size(STDIN_FILENO))
-
-    signal.signal(signal.SIGWINCH, handle_winsize)
+    # 2. initial the window size
     set_winsize(master_fd, *get_size(STDIN_FILENO))
-
+    # 3. redirect stdin to fd
     try:
-        _copy(master_fd, master_read, stdin_read)
-    finally:
-        if restore:
-            tcsetattr(STDIN_FILENO, tty.TCSAFLUSH, mode)
+        redirect_stdin_to_fd(master_fd, signal_fd, master_read, stdin_read)
+    except SignalToStopTerminal:
+        return (
+            pid,
+            -1,
+            lambda: resume_child(pid, master_fd, signal_fd, master_read, stdin_read),
+        )
+    else:
+        close(master_fd)
+        child_pid, wait_status = waitpid(pid, 0)
+        return child_pid, waitstatus_to_exitcode(wait_status)
 
-    close(master_fd)
-    return waitpid(pid, 0)[1]
+
+def resume_child(child_pid, master_fd, signal_fd, master_read, stdin_read):
+    resume_by_pid(child_pid)
+    # 3. redirect stdin to fd
+    try:
+        redirect_stdin_to_fd(master_fd, signal_fd, master_read, stdin_read)
+    except SignalToStopTerminal:
+        return (
+            child_pid,
+            signal.SIGTSTP,
+            lambda: resume_child(
+                child_pid, master_fd, signal_fd, master_read, stdin_read
+            ),
+        )
+    else:
+        close(master_fd)
+        child_pid, wait_status = waitpid(child_pid, 0)
+        return child_pid, waitstatus_to_exitcode(wait_status)
