@@ -81,7 +81,7 @@ def spawn(
     else:
         close(master_fd)
         child_pid, wait_status = waitpid(pid, 0)
-        return child_pid, waitstatus_to_exitcode(wait_status)
+        return child_pid, waitstatus_to_exitcode(wait_status), None
 
 
 def resume_child(child_pid, master_fd, signal_fd, master_read, stdin_read):
@@ -100,4 +100,4 @@ def resume_child(child_pid, master_fd, signal_fd, master_read, stdin_read):
     else:
         close(master_fd)
         child_pid, wait_status = waitpid(child_pid, 0)
-        return child_pid, waitstatus_to_exitcode(wait_status)
+        return child_pid, waitstatus_to_exitcode(wait_status), None
