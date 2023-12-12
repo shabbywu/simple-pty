@@ -10,8 +10,8 @@ repository = "https://github.com/shabbywu/simple-pty"
 homepage = "https://github.com/shabbywu/simple-pty"
 
 packages = [
-    {include = "*.py"},
-    {include = "signals/*.py"},
+    {include = "spty/*.py"},
+    {include = "spty/signals/*.py"},
 ]
 
 [tool.poetry.dependencies]

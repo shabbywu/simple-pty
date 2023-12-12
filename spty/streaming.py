@@ -2,7 +2,7 @@ import os
 import tty
 from select import select
 from tty import setcbreak, tcgetattr, tcsetattr
-from exceptions import SignalToStopTerminal
+from spty.exceptions import SignalToStopTerminal
 
 STDIN_FILENO = 0
 STDOUT_FILENO = 1

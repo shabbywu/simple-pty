@@ -5,11 +5,11 @@ from typing import Tuple, Callable, Optional
 
 from os import close, waitpid, WIFEXITED, WEXITSTATUS, WIFSIGNALED, WTERMSIG
 from pty import fork
-from signals import initial_signals
-from signals.SIGWINCH import set_winsize, get_size
-from signals.SIGTSTP import resume_by_pid
-from streaming import STDIN_FILENO, _read, redirect_stdin_to_fd
-from exceptions import SignalToStopTerminal
+from spty.signals import initial_signals
+from spty.signals.SIGWINCH import set_winsize, get_size
+from spty.signals.SIGTSTP import resume_by_pid
+from spty.streaming import STDIN_FILENO, _read, redirect_stdin_to_fd
+from spty.exceptions import SignalToStopTerminal
 
 CHILD = 0
 __ALL__ = ["spawn"]
@@ -25,15 +25,6 @@ def waitstatus_to_exitcode(status):
     elif WIFSIGNALED(status):
         return WTERMSIG(status)
     raise ValueError("unknown waitstatus")
-
-
-def get_tty_name(pid, fd):
-    try:
-        link_path = f"/proc/{pid}/fd/{fd}"
-        tty_path = os.readlink(link_path)
-        return tty_path.split("/dev/")[1]
-    except FileNotFoundError:
-        return None
 
 
 def spawn(
