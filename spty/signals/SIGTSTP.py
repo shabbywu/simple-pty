@@ -25,12 +25,10 @@ def build_tstp_handler(
         os.kill(child_pid, signal.SIGSTOP)
         # store the context for resuming
         global_jobs[child_pid] = (child_pid, master_fd, signal_fd)
-        # reset default handle
-        signal.signal(signum, signal.SIG_DFL)
         # send a signal to `streaming` there is a SIGTSTP
         if signal_fd:
             os.write(signal_fd, b"1")
-        logger.info("[%d] + %d suspended (signal)", len(global_jobs) + 1, child_pid)
+        logger.warning("[%d] + %d suspended (signal)", len(global_jobs) + 1, child_pid)
 
     return handler
 
@@ -43,6 +41,7 @@ def resume_by_pid(pid):
     child_pid, master_fd, signal_fd = global_jobs.pop(pid)
     # listen the SIGTSTP again
     signal.signal(signal.SIGTSTP, build_tstp_handler(child_pid, master_fd, signal_fd))
+    return child_pid, master_fd, signal_fd
 
 
 def killall_suspended_when_exited():

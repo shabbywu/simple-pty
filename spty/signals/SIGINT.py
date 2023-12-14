@@ -15,7 +15,7 @@ def build_int_handler(child_pid: int = 0):
 
     def handler(signum, frame):
         interrupt_by_pid(pid=child_pid)
-        logger.info("process<%d> have interrupted (signal)", child_pid)
+        logger.warning("process<%d> have interrupted (signal)", child_pid)
 
     return handler
 
